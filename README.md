@@ -1,144 +1,115 @@
-# 🧠 AI Hallucination Detector — Chrome Extension
+AI Hallucination Detector
 
-A fully client-side Chrome Extension (Manifest V3) that detects potential hallucinations in AI-generated text using semantic similarity and cosine similarity scoring. No API keys needed. No backend. 100% private.
+CI
 
-> Built with a collaborator as part of a college society project, then cleaned up and extended
-> (shared scoring module, embedding cache, unit tests, CI, resized icons).
+A Chrome extension that scores each sentence of AI-generated text for semantic consistency with the rest of the text and labels it Low, Medium or High risk. The model runs entirely in the browser: no backend, no API keys, no permissions, and your text never leaves your machine.
 
-## What it measures (and what it does not)
+Built with a collaborator as part of a college society project, then cleaned up and extended (shared scoring module, embedding cache, unit tests, CI).
 
-The extension scores how **semantically consistent** each sentence is with the rest of the text, using MiniLM sentence
-embeddings and cosine similarity. It highlights sentences that drift away from the rest of the text.
-It does **not** check facts: a confident, consistent but false statement can still score as low risk.
-Treat the output as a hint about which sentences to double-check, not as proof of a hallucination.
-Fact-checking is listed under future improvements below.
+What it does (and does not do)
 
+Paste a block of text, click Analyze, and the extension returns:
 
----
+a risk label per sentence (Low, Medium or High) with its score,
+an overall percentage and risk label for the whole text.
 
-## ⚙️ How It Works
+It flags sentences that drift away from the rest of the text, which is often a sign that a passage deserves a second look.
 
-### Detection Algorithm
-1. **Sentence Segmentation** — splits input using `Intl.Segmenter`
-2. **Embedding Generation** — `Xenova/all-MiniLM-L6-v2` (runs via WebAssembly in browser)
-3. **Cosine Similarity** — each sentence vs. full-document embedding (60% weight) + cross-sentence consistency (40% weight)
-4. **Scoring** — support score per sentence → aggregate hallucination % → Low / Medium / High risk label
+It does not check facts. The score measures consistency, not truth: a confident, internally consistent but false statement can still score as low risk. Treat the output as a hint about what to double-check, not as proof of a hallucination. Fact-checking against an external source is listed under future work.
 
-### Risk Thresholds
-| Support Score | Risk Level | Color |
-|---|---|---|
-| ≥ 55% | Low Risk | 🟢 Green |
-| 38–54% | Medium Risk | 🟡 Yellow |
-| < 38% | High Risk | 🔴 Red |
+How it works
+Segment the input into sentences with Intl.Segmenter (regex fallback), dropping fragments of 10 characters or fewer.
+Embed the full text and each sentence with Xenova/all-MiniLM-L6-v2 (about 22 MB, run in WebAssembly through Transformers.js inside a Web Worker so the popup stays responsive).
+Score each sentence as a blend of two cosine similarities:
+60% similarity to the full text (does it fit the overall topic?),
+40% mean similarity to the other sentences (is it consistent with its neighbours?).
+Label each sentence by its blended support score, and the whole text by the average.
+Support score	Sentence label
+0.55 or higher	Low risk
+0.38 to 0.54	Medium risk
+below 0.38	High risk
 
----
+The overall percentage is (1 − average support) × 100, labelled Low (under 35%), Medium (35% to 59%) or High (60% or more). The thresholds were tuned by hand for MiniLM and have not been validated on a labelled dataset.
 
-## 🚀 Setup & Build
+Design notes
+Client-side only. The manifest declares no permissions and no host permissions, and the model is downloaded once from Hugging Face and then cached by the browser.
+Web Worker. Inference runs off the main thread, so the popup does not freeze during analysis.
+Model-independent pipeline. analyze.js takes the embedding function as an argument, so the same code runs in the worker with the real model and in unit tests with a fake one.
+Performance
 
-### Prerequisites
-- Node.js ≥ 18
-- npm ≥ 9
+The first version re-embedded every other sentence for each sentence, so a text with n sentences needed n² + 1 model calls. Each sentence is now embedded once, so it needs n + 1.
 
-### Install
-```bash
-cd Ai-hallucination-detector
+Sentences	Model calls before	Model calls now
+4	17	5
+9	82	10
+20	401	21
+
+The scores are identical, and a unit test checks this against the original algorithm.
+
+Getting started
+
+Requirements: Node.js 18 or newer and npm 9 or newer.
+
+bash
+git clone https://github.com/Abhi1419/ai-hallucination-detection-kit.git
+cd ai-hallucination-detection-kit
 npm install
-```
-
-### Build
-```bash
 npm run build
-```
-This outputs the extension to the `dist/` folder.
 
-> **First build takes ~30s** as Vite bundles the transformers library. Subsequent builds are fast.
+Then load it in Chrome:
 
----
+Open chrome://extensions and switch on Developer mode.
+Click Load unpacked and select the dist/ folder.
+Click the extension icon in the toolbar to open the popup.
 
-## ✅ Tests
+The first analysis downloads the model (about 22 MB), so it takes a little longer. After that it is cached.
 
-```bash
+Tests
+bash
 npm test
-```
-Unit tests (Vitest) cover sentence segmentation, cosine similarity, risk thresholds and the scoring pipeline.
-They also check that the faster pipeline gives exactly the same scores as the original algorithm.
-A GitHub Actions workflow runs the tests and the build on every push.
 
-## ⚡ Performance note
+Vitest covers sentence segmentation, cosine similarity, risk thresholds, the percentage calculation and the analysis pipeline, including a check that the optimised pipeline matches the original algorithm and that it calls the model n + 1 times. GitHub Actions runs the tests and the production build on every push.
 
-The original worker re-embedded every other sentence for each sentence, so a text with *n* sentences
-needed *n² + 1* model calls (91 for 9 sentences). Each sentence is now embedded once, so it needs *n + 1* (10 for 9 sentences).
-The scores are unchanged, which a unit test confirms.
+Sample inputs
 
-## 🔌 Load in Chrome
+Three inputs to try. Scores depend on the model and the wording, so treat the intended labels as a guide.
 
-1. Open Chrome and navigate to `chrome://extensions`
-2. Enable **Developer mode** (toggle in top-right corner)
-3. Click **Load unpacked**
-4. Select the `dist/` folder inside the project directory
-5. The extension icon 🧠 appears in your toolbar — click it to open the popup
+Mostly false claims (intended to score as high risk)
 
-> **Note:** The first time you click "Analyze Text", the model (`all-MiniLM-L6-v2`, ~22MB) downloads from HuggingFace and is cached in the browser. All subsequent runs are instant.
-
----
-
-## 🧪 Sample Inputs
-
-These are sample inputs for trying the tool. The score depends on the model and the wording, so treat the intended labels as a guide.
-
-
-### Test 1 — Mostly false claims (intended to score as high risk)
-```
 The Eiffel Tower was built in 1989 by Leonardo da Vinci as a lighthouse for the Mediterranean Sea. It is located in Berlin, Germany and stands 5,000 meters tall. The structure is made entirely of gold and was sold to the United States in 1945. It currently serves as the world's tallest underwater observation deck.
-```
 
-### Test 2 — Mixed true and false claims (intended to score as medium risk)
-```
+Mixed true and false claims (intended to score as medium risk)
+
 The Great Wall of China was constructed over many centuries, beginning around the 7th century BC. It stretches approximately 13,000 miles and was primarily used as a barrier against invasions. The wall is made of stone, brick, tamped earth, and even pizza, according to recent historians. Many sections of the Great Wall are well-preserved today and attract millions of tourists annually.
-```
 
-### Test 3 — Accurate claims (intended to score as low risk)
-```
+Accurate claims (intended to score as low risk)
+
 The Eiffel Tower was built between 1887 and 1889 by Gustave Eiffel's company as the entrance arch to the 1889 World's Fair. It stands 330 meters tall and is located in Paris, France on the Champ de Mars. The tower was initially criticized by some French artists but has since become one of the most recognizable structures in the world. It attracts approximately seven million visitors per year.
-```
-
----
-
-## 📁 Project Structure
-
-```
-ai-hallucination-detector/
+Project structure
+├── .github/workflows/ci.yml   # Runs tests and build on every push
 ├── public/
-│   ├── manifest.json        # Chrome Manifest V3
-│   └── icons/               # Extension icons
+│   ├── manifest.json          # Chrome Manifest V3 (no permissions)
+│   └── icons/
 ├── src/
-│   ├── components/
-│   │   ├── HeroHeader.jsx       # Animated header
-│   │   ├── TextInputPanel.jsx   # Text input + analyze button
-│   │   ├── LoadingView.jsx      # Scanning animation
-│   │   ├── ResultsPanel.jsx     # Score gauge + risk badge
-│   │   └── SentenceCard.jsx     # Per-sentence analysis card
+│   ├── components/            # Popup UI (header, input, loading, results, sentence cards)
 │   ├── lib/
-│   │   ├── worker.js        # Web Worker: loads the model, calls the pipeline
-│   │   ├── analyze.js       # Model-independent analysis pipeline (embeds each sentence once)
-│   │   ├── textHelper.js    # Segmentation, cosine similarity, scoring
-│   │   └── textHelper.test.js  # Unit tests
-│   ├── App.jsx              # Main app state machine
-│   ├── main.jsx             # React entry point
-│   └── index.css            # Global styles + animations
-├── index.html               # Popup HTML shell
-├── vite.config.js           # Build configuration
+│   │   ├── worker.js          # Web Worker: loads the model and runs the pipeline
+│   │   ├── analyze.js         # Model-independent pipeline (embeds each sentence once)
+│   │   ├── textHelper.js      # Segmentation, cosine similarity, scoring, risk labels
+│   │   └── textHelper.test.js # Unit tests
+│   ├── App.jsx                # Popup state machine
+│   └── main.jsx
+├── index.html
+├── vite.config.js
 └── package.json
-```
-
----
-
-## 🔮 Future Improvements
-
-- **Fact-checking via external APIs** — cross-reference named entities against Wikipedia or Google Knowledge Graph
-- **Model caching status indicator** — show download progress bar on first load
-- **History panel** — save past analyses for comparison
-- **Context upload mode** — compare AI output against a user-provided source document
-- **Export report** — download analysis as PDF or JSON
-- **Browser action badge** — show risk level on the extension icon
-- **Sidebar mode** — detect hallucinations directly on any web page without copy-pasting
+Known limitations
+Scores consistency, not factual accuracy (see above).
+Thresholds are hand-tuned and not validated on labelled data.
+Works on pasted text only; it does not read the page you are viewing.
+Very short sentences are skipped, and the model is English-focused.
+Future work
+Validate the thresholds on a labelled set of true and false statements and report accuracy.
+Cross-check named entities against an external source such as Wikipedia.
+Compare AI output against a user-supplied source document.
+Download progress indicator, analysis history and report export.
+Sidebar mode to analyse text directly on a web page.
